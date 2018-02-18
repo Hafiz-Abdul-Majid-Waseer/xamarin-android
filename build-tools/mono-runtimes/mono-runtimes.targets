@@ -34,11 +34,13 @@
     <_MonoOutputDir>$(MonoSourceFullPath)\mcs\class\lib\monodroid_tools</_MonoOutputDir>
   </PropertyGroup>
   <PropertyGroup>
+    <_MonoSdksConfiguration Condition=" '$(Configuration)' == 'Release' ">release</_MonoSdksConfiguration>
+    <_MonoSdksConfiguration Condition=" '$(Configuration)' != 'Release' ">debug</_MonoSdksConfiguration>
+  </PropertyGroup>
+  <PropertyGroup>
     <ForceBuildDependsOn>
       _BuildLlvm;
       _InstallLlvm;
-      _Autogen;
-      _ConfigureRuntimes;
       _BuildRuntimes;
       _InstallRuntimes;
       _InstallBcl;
@@ -138,60 +140,27 @@
   </Target>
   <Target Name="_PrepareLlvmItems">
     <ItemGroup>
-      <_LlvmSourceFile Include="$(LlvmSourceFullPath)\lib\**\*.cpp" />
-      <_LlvmHeaderFile Include="$(LlvmSourceFullPath)\lib\**\*.h" />
-      <_LlvmMakefileConfig Include="@(_LlvmRuntime->'$(_LlvmOutputDirTop)\%(BuildDir)\Makefile.config')" />
-      <_LlvmConfigureStamp Include="@(_LlvmRuntime->'$(_LlvmOutputDirTop)\%(BuildDir)\.stamp-configure')" />
-    </ItemGroup>
-
-    <ItemGroup>
-      <_LlvmArchive Include="$(_LlvmOutputDirTop)\%(_LlvmRuntime.BuildDir)\Release\lib\*.a" />
-
-      <_LlvmSourceBinary Include="@(_LlvmRuntime->'$(_LlvmOutputDirTop)\%(BuildDir)\Release\bin\opt%(ExeSuffix)')" Condition=" '%(_LlvmRuntime.InstallBinaries)' == 'true' " />
+      <_LlvmSourceBinary Include="@(_LlvmRuntime->'$(MonoSourceFullPath)\sdks\out\llvm-%(Identity)\bin\opt%(ExeSuffix)')" Condition=" '%(_LlvmRuntime.InstallBinaries)' == 'true' " />
       <_LlvmTargetBinary Include="@(_LlvmRuntime->'$(_MSBuildDir)\%(InstallPath)opt%(ExeSuffix)')" Condition=" '%(_LlvmRuntime.InstallBinaries)' == 'true' "/>
 
-      <_LlvmSourceBinary Include="@(_LlvmRuntime->'$(_LlvmOutputDirTop)\%(BuildDir)\Release\bin\llc%(ExeSuffix)')" Condition=" '%(_LlvmRuntime.InstallBinaries)' == 'true' " />
+      <_LlvmSourceBinary Include="@(_LlvmRuntime->'$(MonoSourceFullPath)\sdks\out\llvm-%(Identity)\bin\llc%(ExeSuffix)')" Condition=" '%(_LlvmRuntime.InstallBinaries)' == 'true' " />
       <_LlvmTargetBinary Include="@(_LlvmRuntime->'$(_MSBuildDir)\%(InstallPath)llc%(ExeSuffix)')" Condition=" '%(_LlvmRuntime.InstallBinaries)' == 'true' " />
     </ItemGroup>
   </Target>
-
-  <Target Name="_ConfigureLlvm"
-          DependsOnTargets="_PrepareLlvmItems"
-          Inputs="$(LlvmSourceFullPath)\Makefile.config.in;$(LlvmSourceFullPath)\configure;@(_LlvmSourceFile);@(_LlvmHeaderFile)"
-          Outputs="@(_LlvmMakefileConfig);@(_LlvmConfigureStamp)"
-          Condition=" $(_LlvmNeeded) != '' ">
-    <MakeDir Directories="$(_LlvmOutputDirTop)\%(_LlvmRuntime.BuildDir)" />
-    <Exec
-        Command="%(_LlvmRuntime.ConfigureEnvironment) $(LlvmSourceFullPath)\configure %(_LlvmRuntime.ConfigureFlags)"
-        IgnoreStandardErrorWarningFormat="True"
-        WorkingDirectory="$(_LlvmOutputDirTop)\%(_LlvmRuntime.BuildDir)"
-    />
-    <Touch
-        Files="$(_LlvmOutputDirTop)\%(_LlvmRuntime.BuildDir)\Makefile.config"
-    />
-    <Touch
-        Files="$(_LlvmOutputDirTop)\%(_LlvmRuntime.BuildDir)\.stamp-configure"
-        AlwaysCreate="true"
-    />
-  </Target>
   
   <Target Name="_BuildLlvm"
-          DependsOnTargets="_ConfigureLlvm"
-          Inputs="@(_LlvmConfigureStamp);@(_LlvmSourceFile);@(_LlvmHeaderFile)"
-          Outputs="@(_LlvmArchive);@(_LlvmSourceBinary)"
-          Condition=" '$(_LlvmNeeded)' != '' ">
+          DependsOnTargets="_PrepareLlvmItems"
+          Condition=" '$(_LlvmNeeded)' != '' "
+          Outputs="@(_LlvmSourceBinary)">
     <Exec
-        Command="%(_LlvmRuntime.BuildEnvironment) make $(MakeConcurrency) all install"
+        Command="make $(MakeConcurrency) package-llvm-%(_LlvmRuntime.Identity) CONFIGURATION=$(_MonoSdksConfiguration)"
         IgnoreStandardErrorWarningFormat="True"
-        WorkingDirectory="$(_LlvmOutputDirTop)\%(_LlvmRuntime.BuildDir)"
-        />
-    <Touch
-        Files="@(_LlvmArchive);@(_LlvmTargetBinary)"
-        />
+        WorkingDirectory="$(MonoSourceFullPath)\sdks\builds"
+    />
   </Target>
 
   <Target Name="_InstallLlvm"
-          DependsOnTargets="_BuildLlvm"
+          DependsOnTargets="_PrepareLlvmItems"
           Inputs="@(_LlvmSourceBinary)"
           Outputs="@(_LlvmTargetBinary)"
           Condition=" '$(_LlvmNeeded)' != '' ">
@@ -202,39 +171,15 @@
         Files="@(_LlvmTargetBinary)" />
   </Target>
 
-  <Target Name="_Autogen"
-      DependsOnTargets="_SetAutogenShTimeToLastCommitTimestamp"
-      Inputs="$(MonoSourceFullPath)\autogen.sh"
-      Outputs="$(MonoSourceFullPath)\configure">
-    <Exec
-        Command="NOCONFIGURE=1 ./autogen.sh"
-        WorkingDirectory="$(MonoSourceFullPath)"
-    />
-  </Target>
-  <Target Name="_ConfigureRuntimes"
-      DependsOnTargets="_BuildLlvm;_Autogen"
-      Inputs="$(MonoSourceFullPath)\configure"
-      Outputs="$(IntermediateOutputPath)\%(_MonoRuntime.Identity)\Makefile">
-    <MakeDir Directories="$(IntermediateOutputPath)\%(_MonoRuntime.Identity)" />
-    <Exec
-        Command="$(MonoSourceFullPath)\configure LDFLAGS=&quot;%(_MonoRuntime.LdFlags)&quot; CFLAGS=&quot;%(_MonoRuntime.CFlags)&quot; CXXFLAGS=&quot;%(_MonoRuntime.CxxFlags)&quot; CC=&quot;%(_MonoRuntime.Cc)&quot; CXX=&quot;%(_MonoRuntime.Cxx)&quot; CPP=&quot;%(_MonoRuntime.Cpp)&quot; CXXCPP=&quot;%(_MonoRuntime.CxxCpp)&quot; LD=&quot;%(_MonoRuntime.Ld)&quot; AR=&quot;%(_MonoRuntime.Ar)&quot; AS=&quot;%(_MonoRuntime.As)&quot; RANLIB=&quot;%(_MonoRuntime.RanLib)&quot; STRIP=&quot;%(_MonoRuntime.Strip)&quot; DLLTOOL=&quot;%(_MonoRuntime.DllTool)&quot; OBJDUMP=&quot;%(_MonoRuntime.Objdump)&quot; --cache-file=..\%(_MonoRuntime.Identity).config.cache %(_MonoRuntime.ConfigureFlags)"
-        IgnoreStandardErrorWarningFormat="True"
-        WorkingDirectory="$(IntermediateOutputPath)\%(_MonoRuntime.Identity)"
-    />
-    <Touch
-        Files="$(IntermediateOutputPath)\%(_MonoRuntime.Identity)\.stamp"
-        AlwaysCreate="True"
-    />
-  </Target>
   <Target Name="_GetRuntimesOutputItems">
     <ItemGroup>
       <_RuntimeSource
           Condition=" '%(_MonoRuntime.DoBuild)' == 'True' "
-          Include="@(_MonoRuntime->'$(IntermediateOutputPath)\%(Identity)\mono\mini\.libs\%(OutputRuntimeFilename).%(NativeLibraryExtension)')"
+          Include="@(_MonoRuntime->'$(MonoSourceFullPath)\sdks\out\android-%(Identity)-$(_MonoSdksConfiguration)\lib\%(OutputRuntimeFilename).%(NativeLibraryExtension)')"
       />
       <_MonoBinarySource
           Condition=" '%(_MonoRuntime.DoBuild)' == 'True' And 'host-$(HostOS)' == '%(Identity)' "
-          Include="@(_MonoRuntime->'$(IntermediateOutputPath)\%(Identity)\mono\mini\mono')"
+          Include="@(_MonoRuntime->'$(MonoSourceFullPath)\sdks\out\android-%(Identity)-$(_MonoSdksConfiguration)\bin\mono')"
       />
       <_InstallMonoBinaryOutput
           Condition=" '%(_MonoRuntime.DoBuild)' == 'True' And 'host-$(HostOS)' == '%(Identity)' "
@@ -250,11 +195,11 @@
       />
       <_ProfilerSource
           Condition=" '%(_MonoRuntime.DoBuild)' == 'True' And '%(_MonoRuntime.OutputProfilerFilename)' != '' "
-          Include="@(_MonoRuntime->'$(IntermediateOutputPath)\%(Identity)\mono\profiler\.libs\%(OutputProfilerFilename).%(NativeLibraryExtension)')"
+          Include="@(_MonoRuntime->'$(MonoSourceFullPath)\sdks\out\android-%(Identity)-$(_MonoSdksConfiguration)\lib\%(OutputProfilerFilename).%(NativeLibraryExtension)')"
       />
       <_ProfilerSource
           Condition=" '%(_MonoRuntime.DoBuild)' == 'True' And '%(_MonoRuntime.OutputAotProfilerFilename)' != '' "
-          Include="@(_MonoRuntime->'$(IntermediateOutputPath)\%(Identity)\mono\profiler\.libs\%(OutputAotProfilerFilename).%(NativeLibraryExtension)')"
+          Include="@(_MonoRuntime->'$(MonoSourceFullPath)\sdks\out\android-%(Identity)-$(_MonoSdksConfiguration)\lib\%(OutputAotProfilerFilename).%(NativeLibraryExtension)')"
       />
       <_InstallProfilerOutput
           Condition=" '%(_MonoRuntime.DoBuild)' == 'True' And '%(_MonoRuntime.OutputProfilerFilename)' != '' "
@@ -274,7 +219,7 @@
       />
       <_MonoBtlsSource
           Condition=" '%(_MonoRuntime.DoBuild)' == 'True' And '%(_MonoRuntime.OutputMonoBtlsFilename)' != '' "
-          Include="@(_MonoRuntime->'$(IntermediateOutputPath)\%(Identity)\mono\btls\build-shared\%(OutputMonoBtlsFilename).%(NativeLibraryExtension)')"
+          Include="@(_MonoRuntime->'$(MonoSourceFullPath)\sdks\out\android-%(Identity)-$(_MonoSdksConfiguration)\lib\%(OutputMonoBtlsFilename).%(NativeLibraryExtension)')"
       />
       <_InstallMonoBtlsOutput
           Condition=" '%(_MonoRuntime.DoBuild)' == 'True' And '%(_MonoRuntime.OutputMonoBtlsFilename)' != '' "
@@ -286,7 +231,7 @@
       />
       <_MonoPosixHelperSource
           Condition=" '%(_MonoRuntime.DoBuild)' == 'True' And '%(_MonoRuntime.OutputMonoPosixHelperFilename)' != '' "
-          Include="@(_MonoRuntime->'$(IntermediateOutputPath)\%(Identity)\support\.libs\%(OutputMonoPosixHelperFilename).%(NativeLibraryExtension)')"
+          Include="@(_MonoRuntime->'$(MonoSourceFullPath)\sdks\out\android-%(Identity)-$(_MonoSdksConfiguration)\lib\%(OutputMonoPosixHelperFilename).%(NativeLibraryExtension)')"
       />
       <_InstallMonoPosixHelperOutput
           Condition=" '%(_MonoRuntime.DoBuild)' == 'True' And '%(_MonoRuntime.OutputMonoPosixHelperFilename)' != '' "
@@ -298,7 +243,7 @@
       />
       <_RuntimeEglibHeaderSource
           Condition=" '%(_MonoRuntime.DoBuild)' == 'True' "
-          Include="@(_MonoRuntime->'$(IntermediateOutputPath)\%(Identity)\mono\eglib\eglib-config.h')"
+          Include="@(_MonoRuntime->'$(MonoSourceFullPath)\sdks\builds\android-%(Identity)-$(_MonoSdksConfiguration)\mono\eglib\eglib-config.h')"
       />
       <_RuntimeEglibHeaderOutput
           Condition=" '%(_MonoRuntime.DoBuild)' == 'True' "
@@ -312,33 +257,32 @@
           Condition=" '%(_MonoRuntime.DoBuild)' == 'True' "
           Include="$(_OutputIncludeDir)Consts.cs"
       />
-      <_RuntimeBuildStamp       Condition=" '%(_MonoRuntime.DoBuild)' == 'true' " Include="@(_MonoRuntime->'$(IntermediateOutputPath)\%(Identity)\.stamp')" />
     </ItemGroup>
   </Target>
   <Target Name="_BuildRuntimes"
-      DependsOnTargets="_GetRuntimesOutputItems;_ConfigureRuntimes"
-      Inputs="@(_RuntimeBuildStamp)"
-      Outputs="@(_RuntimeSource);@(_ProfilerSource);@(_MonoPosixHelperSource);@(_BclProfileItems);@(_MonoBtlsSource);@(_BclTestOutput)">
+      DependsOnTargets="_GetRuntimesOutputItems"
+      Outputs="@(_RuntimeSource);@(_MonoBinarySource);@(_ProfilerSource);@(_MonoBtlsSource);@(_MonoPosixHelperSource);@(_RuntimeEglibHeaderSource);@(_MonoConstsSource);@(_BclProfileItems);@(_BclTestOutput)">
     <Exec
         Condition=" '%(_MonoRuntime.DoBuild)' == 'true' "
-        Command="make $(MakeConcurrency) # %(_MonoRuntime.Identity)"
+        Command="make $(MakeConcurrency) package-android-%(_MonoRuntime.Identity) CONFIGURATION=$(_MonoSdksConfiguration)"
         IgnoreStandardErrorWarningFormat="True"
-        WorkingDirectory="$(IntermediateOutputPath)\%(_MonoRuntime.Identity)"
+        WorkingDirectory="$(MonoSourceFullPath)\sdks\builds"
     />
-    <Touch
-        Files="@(_RuntimeSource);@(_ProfilerSource);@(_MonoPosixHelperSource);@(_BclProfileItems);@(_MonoBtlsSource)"
-    />
+  </Target>
+  <Target Name="_InstallRuntimes"
+      DependsOnTargets="_GetRuntimesOutputItems"
+      Inputs="@(_RuntimeSource);@(_MonoBinarySource);@(_ProfilerSource);@(_MonoBtlsSource);@(_MonoPosixHelperSource);@(_RuntimeEglibHeaderSource);@(_MonoConstsSource);"
+      Outputs="@(_InstallRuntimeOutput);@(_InstallMonoBinaryOutput);@(_InstallProfilerOutput);@(_InstallMonoPosixHelperOutput);@(_RuntimeEglibHeaderOutput)">
     <Exec
-        Command="make $(MakeConcurrency) test # %(_MonoRuntime.Identity)"
+        Command="make $(MakeConcurrency) -C android-%(_MonoRuntime.Identity)-$(_MonoSdksConfiguration) -C runtime test"
         IgnoreStandardErrorWarningFormat="True"
-        WorkingDirectory="$(IntermediateOutputPath)\%(_MonoRuntime.Identity)\runtime"
+        WorkingDirectory="$(MonoSourceFullPath)\sdks\builds"
     />
     <Exec
         Condition=" '%(MonoTestAssembly.TestType)' == 'xunit' "
         Command="make -C $(MonoSourceFullPath)\mcs\class\%(MonoTestAssembly.SourcePath) xunit-test-local"
         WorkingDirectory="$(MonoSourceFullPath)"
     />
-
     <ItemGroup>
       <_BclTestAssemblyReference Include="@(MonoTestAssembly)" Condition="'%(MonoTestAssembly.TestType)' == 'reference'" />
       <_BclTestAssemblyXUnit  Include="@(MonoTestAssembly)" Condition="'%(MonoTestAssembly.TestType)' == 'xunit'" />
@@ -392,11 +336,7 @@
     <Touch
         Files="$(XAInstallPrefix)\..\..\bcl-tests\bcl-tests.zip"
     />
-  </Target>
-  <Target Name="_InstallRuntimes"
-      DependsOnTargets="_GetRuntimesOutputItems"
-      Inputs="@(_RuntimeSource);@(_MonoBinarySource);@(_ProfilerSource);@(_MonoPosixHelperSource);@(_RuntimeEglibHeaderSource)"
-      Outputs="@(_InstallRuntimeOutput);@(_InstallMonoBinaryOutput);@(_InstallProfilerOutput);@(_InstallMonoPosixHelperOutput);@(_RuntimeEglibHeaderOutput)">
+
     <MakeDir
         Condition=" '%(_MonoRuntime.DoBuild)' == 'true' "
         Directories="$(_MSBuildDir)\lib\%(_MonoRuntime.Identity)"
@@ -604,11 +544,11 @@
       <_CppAbiArch Condition="$(AndroidSupportedHostJitAbisForConditionalChecks.Contains (':Linux:'))"></_CppAbiArch>
     </PropertyGroup>
     <Exec
-        Command="MONO_PATH=$(_AotOffsetsDumperSourceDir)\CppSharp\$(_CppAbiDir) $(ManagedRuntime) $(_CppAbiArch) $(_AotOffsetsDumperSourceDir)\$(_AotOffsetsDumperName) --android-ndk=&quot;$(AndroidNdkFullPath)&quot; --mono=&quot;$(MonoSourceFullPath)&quot; --monodroid=&quot;$(XamarinAndroidSourcePath)&quot; --abi=&quot;%(_MonoCrossRuntime.TargetAbi)&quot; --targetdir=&quot;$(MSBuildThisFileDirectory)$(IntermediateOutputPath)\%(_MonoCrossRuntime.JitArch)&quot; --out=&quot;$(MSBuildThisFileDirectory)$(IntermediateOutputPath)\%(_MonoCrossRuntime.Identity)&quot;"
+        Command="MONO_PATH=$(_AotOffsetsDumperSourceDir)\CppSharp\$(_CppAbiDir) $(ManagedRuntime) $(_CppAbiArch) $(_AotOffsetsDumperSourceDir)\$(_AotOffsetsDumperName) --android-ndk=&quot;$(AndroidNdkFullPath)&quot; --mono=&quot;$(MonoSourceFullPath)&quot; --monodroid=&quot;$(XamarinAndroidSourcePath)&quot; --abi=&quot;%(_MonoCrossRuntime.TargetAbi)&quot; --targetdir=&quot;$(MonoSourceFullPath)\sdks\builds\android-%(_MonoCrossRuntime.JitArch)-$(_MonoSdksConfiguration)&quot; --out=&quot;$(MSBuildThisFileDirectory)$(IntermediateOutputPath)\%(_MonoCrossRuntime.Identity)&quot;"
         WorkingDirectory="$(IntermediateOutputPath)\%(_MonoCrossRuntime.Identity)"
     />
     <Touch
-        Files="$(IntermediateOutputPath)\%(_MonoCrossRuntime.Identity)\%(_MonoCrossRuntime.OffsetsHeaderFile)" 
+        Files="$(IntermediateOutputPath)\%(_MonoCrossRuntime.Identity)\%(_MonoCrossRuntime.TargetAbi).h"
     />
   </Target>
 
@@ -705,7 +645,19 @@
   </Target>
   <Target Name="_CleanRuntimes"
       AfterTargets="Clean">
-    <RemoveDir Directories="@(_MonoRuntime->'$(IntermediateOutputPath)\%(Identity)');@(_MonoCrossRuntime->'$(IntermediateOutputPath)\%(Identity)');$(_LlvmBuildDir32);$(_LlvmBuildDir64);$(_LlvmBuildDirWin32);$(_LlvmBuildDirWin64)" />
+    <RemoveDir Directories="@(_MonoRuntime->'$(IntermediateOutputPath)\%(Identity)');@(_MonoCrossRuntime->'$(IntermediateOutputPath)\%(Identity)')" />
     <Delete Files="@(_MonoRuntime->'$(IntermediateOutputPath)\%(Identity).config.cache');$(_CrossOutputPrefix)*.config.cache;$(_CrossOutputDirTop)\llvm*.config.cache" />
+    <Exec
+        Condition=" '%(_MonoRuntime.DoBuild)' == 'true' "
+        Command="make $(MakeConcurrency) clean-android-%(_MonoRuntime.Identity) CONFIGURATION=$(_MonoSdksConfiguration)"
+        IgnoreStandardErrorWarningFormat="True"
+        WorkingDirectory="$(MonoSourceFullPath)\sdks\builds"
+    />
+    <Exec
+        Condition=" '%(_MonoRuntime.DoBuild)' == 'true' "
+        Command="make $(MakeConcurrency) clean-llvm-%(_LlvmRuntime.Identity) CONFIGURATION=$(_MonoSdksConfiguration)"
+        IgnoreStandardErrorWarningFormat="True"
+        WorkingDirectory="$(MonoSourceFullPath)\sdks\builds"
+    />
   </Target>
 </Project>
